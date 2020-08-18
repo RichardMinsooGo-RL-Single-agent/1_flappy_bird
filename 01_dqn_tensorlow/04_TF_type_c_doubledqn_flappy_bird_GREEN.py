@@ -22,7 +22,7 @@ import wrapped_flappy_bird as game
 
 # Hyper Parameters:
 FRAME_PER_ACTION = 1
-game_name = 'bird_TF_Nature2015_c'    # the name of the game being played for log files
+game_name = 'bird_TF_doubledqn_c'    # the name of the game being played for log files
 action_size = 2               # number of valid actions
 
 model_path = "save_model/" + game_name
@@ -195,6 +195,7 @@ class DQN_agent:
         # Get target values
         y_array = []
         # Selecting actions
+        q_value_next = self.output.eval(feed_dict = {self.input: next_states})
         tgt_q_value_next = self.tgt_output.eval(feed_dict = {self.tgt_input: next_states})
 
         for i in range(0,self.batch_size):
@@ -202,7 +203,9 @@ class DQN_agent:
             if done:
                 y_array.append(rewards[i])
             else:
-                y_array.append(rewards[i] + self.discount_factor * np.max(tgt_q_value_next[i]))
+                # y_array.append(rewards[i] + self.discount_factor * np.max(tgt_q_value_next[i]))
+                a = np.argmax(tgt_q_value_next[i])
+                y_array.append(rewards[i] + self.discount_factor * q_value_next[i][a] )
 
         # Training!! 
         feed_dict = {self.action_tgt: actions, self.y_tgt: y_array, self.input: states}

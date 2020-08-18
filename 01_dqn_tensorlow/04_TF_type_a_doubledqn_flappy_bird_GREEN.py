@@ -22,7 +22,7 @@ import wrapped_flappy_bird as game
 
 # Hyper Parameters:
 FRAME_PER_ACTION = 1
-game_name = 'bird_TF_Nature2015_c'    # the name of the game being played for log files
+game_name = 'bird_TF_doubledqn_a'    # the name of the game being played for log files
 action_size = 2               # number of valid actions
 
 model_path = "save_model/" + game_name
@@ -44,7 +44,7 @@ class DQN_agent:
         self.action_size = action_size
         
         # train time define
-        self.training_time = 10*60
+        self.training_time = 5*60
         
         # These are hyper parameters for the DQN
         self.learning_rate = 0.0001
@@ -77,12 +77,6 @@ class DQN_agent:
         self.img_rows , self.img_cols = 80, 80
         self.img_channels = 4 #We stack 4 frames
 
-        self.first_conv   = Deep_Parameters.first_conv
-        self.second_conv  = Deep_Parameters.second_conv
-        self.third_conv   = Deep_Parameters.third_conv
-        self.first_dense  = Deep_Parameters.first_dense
-        self.second_dense = Deep_Parameters.second_dense
-
         # Initialize Network
         self.input, self.output = self.build_model('network')
         self.tgt_input, self.tgt_output = self.build_model('target')
@@ -111,23 +105,6 @@ class DQN_agent:
         state_out = np.reshape(state_out, (self.img_rows, self.img_cols, 1))
         return state_out
 
-    # Convolution and pooling
-    def conv2d(self, x, w, stride):
-        return tf.nn.conv2d(x,w,strides=[1, stride, stride, 1], padding='SAME')
-
-    # Get Variables
-    def conv_weight_variable(self, name, shape):
-        initial = tf.truncated_normal(shape, stddev = 0.01)
-        return tf.Variable(initial)
-
-    def weight_variable(self, name, shape):
-        initial = tf.truncated_normal(shape, stddev = 0.01)
-        return tf.Variable(initial)
-
-    def bias_variable(self, name, shape):
-        initial = tf.constant(0.01, shape = shape)
-        return tf.Variable(initial)
-
     def max_pool_2x2(self,x):
         return tf.nn.max_pool(x, ksize = [1, 2, 2, 1], strides = [1, 2, 2, 1], padding = "SAME")
 
@@ -139,34 +116,14 @@ class DQN_agent:
                                                       self.img_channels])
         # network weights
         with tf.variable_scope(network_name):
-            # Convolution variables
-            w_conv1 = self.conv_weight_variable('_w_conv1', self.first_conv)
-            b_conv1 = self.bias_variable('_b_conv1',[self.first_conv[3]])
-
-            w_conv2 = self.conv_weight_variable('_w_conv2',self.second_conv)
-            b_conv2 = self.bias_variable('_b_conv2',[self.second_conv[3]])
-
-            w_conv3 = self.conv_weight_variable('_w_conv3',self.third_conv)
-            b_conv3 = self.bias_variable('_b_conv3',[self.third_conv[3]])
-
-            # Densely connect layer variables
-            w_fc1 = self.weight_variable('_w_fc1',self.first_dense)
-            b_fc1 = self.bias_variable('_b_fc1',[self.first_dense[1]])
-
-            w_fc2 = self.weight_variable('_w_fc2',self.second_dense)
-            b_fc2 = self.bias_variable('_b_fc2',[self.second_dense[1]])
-
-        # hidden layers
-        h_conv1 = tf.nn.relu(self.conv2d(x_image,w_conv1,4) + b_conv1)
-        h_conv1 = self.max_pool_2x2(h_conv1)
-        h_conv2 = tf.nn.relu(self.conv2d(h_conv1, w_conv2, 2) + b_conv2)
-        h_conv3 = tf.nn.relu(self.conv2d(h_conv2, w_conv3, 1) + b_conv3)
-
-        h_pool3_flat = tf.reshape(h_conv3, [-1, self.first_dense[0]])
-        h_fc1 = tf.nn.relu(tf.matmul(h_pool3_flat, w_fc1)+b_fc1)
-
-        # Q Value layer
-        output = tf.matmul(h_fc1, w_fc2) + b_fc2
+            model = tf.layers.conv2d(x_image, 32, [8, 8], padding='same', activation=tf.nn.relu)
+            model = self.max_pool_2x2(model)
+            model = tf.layers.conv2d(model, 64, [4, 4], padding='same', activation=tf.nn.relu)
+            model = tf.layers.conv2d(model, 64, [3, 3], padding='same', activation=tf.nn.relu)
+            model = tf.contrib.layers.flatten(model)
+            # model = tf.layers.dense(model, 1024, activation=tf.nn.relu)
+            model = tf.layers.dense(model, 512, activation=tf.nn.relu)
+            output = tf.layers.dense(model, self.action_size, activation=None)
         return x_image, output
 
     def loss_and_train(self):
@@ -195,6 +152,7 @@ class DQN_agent:
         # Get target values
         y_array = []
         # Selecting actions
+        q_value_next = self.output.eval(feed_dict = {self.input: next_states})
         tgt_q_value_next = self.tgt_output.eval(feed_dict = {self.tgt_input: next_states})
 
         for i in range(0,self.batch_size):
@@ -202,7 +160,9 @@ class DQN_agent:
             if done:
                 y_array.append(rewards[i])
             else:
-                y_array.append(rewards[i] + self.discount_factor * np.max(tgt_q_value_next[i]))
+                # y_array.append(rewards[i] + self.discount_factor * np.max(tgt_q_value_next[i]))
+                a = np.argmax(tgt_q_value_next[i])
+                y_array.append(rewards[i] + self.discount_factor * q_value_next[i][a] )
 
         # Training!! 
         feed_dict = {self.action_tgt: actions, self.y_tgt: y_array, self.input: states}

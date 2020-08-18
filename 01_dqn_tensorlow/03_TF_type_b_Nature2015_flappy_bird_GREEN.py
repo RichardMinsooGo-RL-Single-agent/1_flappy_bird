@@ -1,11 +1,11 @@
 # Import modules
+import cv2
 import tensorflow as tf
 import os.path
 import random
 import numpy as np
 import time, datetime
 from collections import deque
-import cv2
 import pickle
 
 import os
@@ -22,7 +22,7 @@ import wrapped_flappy_bird as game
 
 # Hyper Parameters:
 FRAME_PER_ACTION = 1
-game_name = 'bird_TF_2015_2_a'    # the name of the game being played for log files
+game_name = 'bird_TF_Nature2015_b'    # the name of the game being played for log files
 action_size = 2               # number of valid actions
 
 model_path = "save_model/" + game_name
@@ -44,7 +44,7 @@ class DQN_agent:
         self.action_size = action_size
         
         # train time define
-        self.training_time = 5*60
+        self.training_time = 10*60
         
         # These are hyper parameters for the DQN
         self.learning_rate = 0.0001
@@ -60,7 +60,7 @@ class DQN_agent:
         self.score = 0
         self.episode = 0
         
-        self.ep_trial_step = 5000
+        self.ep_trial_step = 2000
         
         # parameters for skipping and stacking
         # Parameter for Experience Replay
@@ -74,7 +74,6 @@ class DQN_agent:
         self.target_update_cycle = 200
         
         # Parameters for network
-        # self.img_size = 80
         self.img_rows , self.img_cols = 80, 80
         self.img_channels = 4 #We stack 4 frames
 
@@ -186,6 +185,7 @@ class DQN_agent:
         return x_image, output, w_conv1, b_conv1, w_conv2, b_conv2, w_conv3, b_conv3, w_fc1, b_fc1, w_fc2, b_fc2
 
     def loss_and_train(self):
+        # Loss function and Train
         self.action_tgt = tf.placeholder(tf.float32,shape = [None,self.action_size])
         self.y_tgt = tf.placeholder(tf.float32, shape = [None]) 
         
@@ -228,6 +228,7 @@ class DQN_agent:
         else :
             self.epsilon = self.epsilon_min
 
+    # get action from model using epsilon-greedy policy
     def get_action(self, stacked_state):
         # choose an action epsilon greedily
         action = np.zeros(self.action_size)
@@ -256,18 +257,17 @@ class DQN_agent:
     def Copy_Weights(self):
         self.sess.run(self.copy_weights_q_to_tgt_q)
 
+            
+        # print(" Weights are copied!!")
+
     def save_model(self):
         # Save the variables to disk.
         save_path = self.saver.save(self.sess, model_path + "/model.ckpt")
-
-        with open(model_path + '/append_sample.pickle', 'wb') as f:
-            pickle.dump(self.memory, f)
-
         save_object = (self.epsilon, self.episode, self.step)
         with open(model_path + '/epsilon_episode.pickle', 'wb') as ggg:
             pickle.dump(save_object, ggg)
 
-        print("\n Model saved in file: %s" % save_path)
+        print("\n Model saved in file: %s" % model_path)
 
 def main():
     
@@ -282,10 +282,8 @@ def main():
 
     if ckpt and tf.train.checkpoint_exists(ckpt.model_checkpoint_path):
         agent.saver.restore(agent.sess, ckpt.model_checkpoint_path)
-        if os.path.isfile(model_path + '/append_sample.pickle'):  
-            with open(model_path + '/append_sample.pickle', 'rb') as f:
-                agent.memory = pickle.load(f)
-
+        if os.path.isfile(model_path + '/epsilon_episode.pickle'):
+            
             with open(model_path + '/epsilon_episode.pickle', 'rb') as ggg:
                 agent.epsilon, agent.episode, agent.step = pickle.load(ggg)
             
@@ -305,13 +303,12 @@ def main():
     # Step 3.2: run the game
     display_time = datetime.datetime.now()
     print("\n\n",game_name, "-game start at :",display_time,"\n")
-    
     start_time = time.time()
     
     # Initialize target network.
     agent.Copy_Weights()
     
-    while time.time() - start_time < 30*60:
+    while time.time() - start_time < agent.training_time:
 
         done = False
         agent.score = 0

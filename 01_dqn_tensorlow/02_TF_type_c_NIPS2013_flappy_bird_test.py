@@ -22,7 +22,7 @@ import wrapped_flappy_bird as game
 
 # Hyper Parameters:
 FRAME_PER_ACTION = 1
-game_name = 'bird_TF_Nature2015_c'    # the name of the game being played for log files
+game_name = 'bird_TF_NIPS2013_c'    # the name of the game being played for log files
 action_size = 2               # number of valid actions
 
 model_path = "save_model/" + game_name
@@ -70,9 +70,6 @@ class DQN_agent:
         # Experience Replay 
         self.memory = deque(maxlen=self.size_replay_memory)
         
-        # Parameter for Target Network
-        self.target_update_cycle = 200
-        
         # Parameters for network
         self.img_rows , self.img_cols = 80, 80
         self.img_channels = 4 #We stack 4 frames
@@ -85,7 +82,6 @@ class DQN_agent:
 
         # Initialize Network
         self.input, self.output = self.build_model('network')
-        self.tgt_input, self.tgt_output = self.build_model('target')
         self.train_step, self.action_tgt, self.y_tgt, self.Loss = self.loss_and_train()
             
     def reset_env(self, game_state):
@@ -195,15 +191,16 @@ class DQN_agent:
         # Get target values
         y_array = []
         # Selecting actions
-        tgt_q_value_next = self.tgt_output.eval(feed_dict = {self.tgt_input: next_states})
+        q_value_next = self.output.eval(feed_dict = {self.input: next_states})
+        # tgt_q_value_next = self.tgt_output.eval(feed_dict = {self.tgt_input: next_states})
 
         for i in range(0,self.batch_size):
             done = minibatch[i][4]
             if done:
                 y_array.append(rewards[i])
             else:
-                y_array.append(rewards[i] + self.discount_factor * np.max(tgt_q_value_next[i]))
-
+                y_array.append(rewards[i] + self.discount_factor * np.max(q_value_next[i]))
+                
         # Training!! 
         feed_dict = {self.action_tgt: actions, self.y_tgt: y_array, self.input: states}
         _, self.loss = self.sess.run([self.train_step, self.Loss], feed_dict = feed_dict)
@@ -238,21 +235,6 @@ class DQN_agent:
         
         while len(self.memory) > self.size_replay_memory:
             self.memory.popleft()
-            
-    # after some time interval update the target model to be same with model
-    def Copy_Weights(self):
-        # Get trainable variables
-        trainable_variables = tf.trainable_variables()
-        # network variables
-        src_vars = [var for var in trainable_variables if var.name.startswith('network')]
-
-        # target variables
-        dest_vars = [var for var in trainable_variables if var.name.startswith('target')]
-
-        for i in range(len(src_vars)):
-            self.sess.run(tf.assign(dest_vars[i], src_vars[i]))
-            
-        # print(" Weights are copied!!")
 
     def save_model(self):
         # Save the variables to disk.
@@ -299,9 +281,6 @@ def main():
     print("\n\n",game_name, "-game start at :",display_time,"\n")
     start_time = time.time()
     
-    # Initialize target network.
-    agent.Copy_Weights()
-    
     while time.time() - start_time < agent.training_time:
 
         done = False
@@ -333,9 +312,6 @@ def main():
             if agent.progress == "Training":
                 # Training!
                 agent.train_model()
-                if done or agent.step % agent.target_update_cycle == 0:
-                    # return# copy q_net --> target_net
-                    agent.Copy_Weights()
                     
             # update the old values
             stacked_state = stacked_next_state

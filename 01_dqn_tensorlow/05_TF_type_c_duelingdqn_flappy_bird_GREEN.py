@@ -22,7 +22,7 @@ import wrapped_flappy_bird as game
 
 # Hyper Parameters:
 FRAME_PER_ACTION = 1
-game_name = 'bird_TF_Nature2015_c'    # the name of the game being played for log files
+game_name = 'bird_duelingdqn_c'    # the name of the game being played for log files
 action_size = 2               # number of valid actions
 
 model_path = "save_model/" + game_name
@@ -80,8 +80,13 @@ class DQN_agent:
         self.first_conv   = Deep_Parameters.first_conv
         self.second_conv  = Deep_Parameters.second_conv
         self.third_conv   = Deep_Parameters.third_conv
-        self.first_dense  = Deep_Parameters.first_dense
-        self.second_dense = Deep_Parameters.second_dense
+        # self.first_dense  = Deep_Parameters.first_dense
+        # self.second_dense = Deep_Parameters.second_dense
+        self.state_dense  = Deep_Parameters.state_dense
+        self.state_output = Deep_Parameters.state_output
+
+        self.action_dense  = Deep_Parameters.action_dense
+        self.action_output = Deep_Parameters.action_output
 
         # Initialize Network
         self.input, self.output = self.build_model('network')
@@ -150,23 +155,43 @@ class DQN_agent:
             b_conv3 = self.bias_variable('_b_conv3',[self.third_conv[3]])
 
             # Densely connect layer variables
-            w_fc1 = self.weight_variable('_w_fc1',self.first_dense)
-            b_fc1 = self.bias_variable('_b_fc1',[self.first_dense[1]])
+            w_state_hidden = self.weight_variable('_w_state_hidden',self.state_dense)
+            b_state_hidden = self.bias_variable('_b_state_hidden',[self.state_dense[1]])
 
-            w_fc2 = self.weight_variable('_w_fc2',self.second_dense)
-            b_fc2 = self.bias_variable('_b_fc2',[self.second_dense[1]])
+            w_state_out = self.weight_variable('_w_state_out',self.state_output)
+            b_state_out = self.bias_variable('_b_state_out',[self.state_output[1]])
 
+            # Densely connect layer variables
+            w_action_hidden = self.weight_variable('_w_action_hidden',self.action_dense)
+            b_action_hidden = self.bias_variable('_b_action_hidden',[self.action_dense[1]])
+
+            w_action_out = self.weight_variable('_w_action_out',self.action_output)
+            b_action_out = self.bias_variable('_b_action_out',[self.action_output[1]])
+        
         # hidden layers
         h_conv1 = tf.nn.relu(self.conv2d(x_image,w_conv1,4) + b_conv1)
         h_conv1 = self.max_pool_2x2(h_conv1)
         h_conv2 = tf.nn.relu(self.conv2d(h_conv1, w_conv2, 2) + b_conv2)
         h_conv3 = tf.nn.relu(self.conv2d(h_conv2, w_conv3, 1) + b_conv3)
 
-        h_pool3_flat = tf.reshape(h_conv3, [-1, self.first_dense[0]])
-        h_fc1 = tf.nn.relu(tf.matmul(h_pool3_flat, w_fc1)+b_fc1)
+        # h_pool3_flat = tf.reshape(h_conv3, [-1, self.first_dense[0]])
+        # h_fc1 = tf.nn.relu(tf.matmul(h_pool3_flat, w_fc1)+b_fc1)
 
+        state_flat = tf.reshape(h_conv3, [-1, self.state_dense[0]])
+        state_hidden = tf.nn.relu(tf.matmul(state_flat, w_state_hidden)+b_state_hidden)
+        
+        action_flat = tf.reshape(h_conv3, [-1, self.action_dense[0]])
+        action_hidden = tf.nn.relu(tf.matmul(action_flat, w_action_hidden)+b_action_hidden)
+        
         # Q Value layer
-        output = tf.matmul(h_fc1, w_fc2) + b_fc2
+        # output = tf.matmul(h_fc1, w_fc2) + b_fc2
+        
+        state_out_layer = tf.matmul(state_hidden, w_state_out) + b_state_out
+        action_out_layer = tf.matmul(action_hidden, w_action_out) + b_action_out
+        
+        model_adv = tf.subtract(action_out_layer, tf.reduce_mean(action_out_layer))
+            
+        output = tf.add(state_out_layer, model_adv)
         return x_image, output
 
     def loss_and_train(self):

@@ -22,7 +22,7 @@ import wrapped_flappy_bird as game
 
 # Hyper Parameters:
 FRAME_PER_ACTION = 1
-game_name = 'bird_TF_Nature2015_c'    # the name of the game being played for log files
+game_name = 'bird_TF_NIPS2013_b'    # the name of the game being played for log files
 action_size = 2               # number of valid actions
 
 model_path = "save_model/" + game_name
@@ -70,9 +70,6 @@ class DQN_agent:
         # Experience Replay 
         self.memory = deque(maxlen=self.size_replay_memory)
         
-        # Parameter for Target Network
-        self.target_update_cycle = 200
-        
         # Parameters for network
         self.img_rows , self.img_cols = 80, 80
         self.img_channels = 4 #We stack 4 frames
@@ -84,10 +81,19 @@ class DQN_agent:
         self.second_dense = Deep_Parameters.second_dense
 
         # Initialize Network
-        self.input, self.output = self.build_model('network')
-        self.tgt_input, self.tgt_output = self.build_model('target')
-        self.train_step, self.action_tgt, self.y_tgt, self.Loss = self.loss_and_train()
-            
+        self.input, self.output, self.w_conv1, \
+        self.b_conv1, self.w_conv2, self.b_conv2,   \
+        self.w_conv3, self.b_conv3, self.w_fc1,     \
+        self.b_fc1, self.w_fc2, self.b_fc2           = self.build_model()
+
+        # init Target Q Network
+        self.tgt_input, self.tgt_output, self.w_conv1_tgt, \
+        self.b_conv1_tgt, self.w_conv2_tgt, self.b_conv2_tgt,   \
+        self.w_conv3_tgt, self.b_conv3_tgt, self.w_fc1_tgt,     \
+        self.b_fc1_tgt, self.w_fc2_tgt, self.b_fc2_tgt          = self.build_model()
+
+        self.loss_and_train()
+    
     def reset_env(self, game_state):
         # get the first state by doing nothing and preprocess the image to 80x80x4
         do_nothing = np.zeros(action_size)
@@ -131,30 +137,28 @@ class DQN_agent:
     def max_pool_2x2(self,x):
         return tf.nn.max_pool(x, ksize = [1, 2, 2, 1], strides = [1, 2, 2, 1], padding = "SAME")
 
-    def build_model(self, network_name):
+    def build_model(self):
         # input layer
         x_image = tf.placeholder(tf.float32, shape = [None,
                                                       self.img_rows,
                                                       self.img_cols,
                                                       self.img_channels])
         # network weights
-        with tf.variable_scope(network_name):
-            # Convolution variables
-            w_conv1 = self.conv_weight_variable('_w_conv1', self.first_conv)
-            b_conv1 = self.bias_variable('_b_conv1',[self.first_conv[3]])
+        w_conv1 = self.conv_weight_variable('_w_conv1', self.first_conv)
+        b_conv1 = self.bias_variable('_b_conv1',[self.first_conv[3]])
 
-            w_conv2 = self.conv_weight_variable('_w_conv2',self.second_conv)
-            b_conv2 = self.bias_variable('_b_conv2',[self.second_conv[3]])
+        w_conv2 = self.conv_weight_variable('_w_conv2',self.second_conv)
+        b_conv2 = self.bias_variable('_b_conv2',[self.second_conv[3]])
 
-            w_conv3 = self.conv_weight_variable('_w_conv3',self.third_conv)
-            b_conv3 = self.bias_variable('_b_conv3',[self.third_conv[3]])
+        w_conv3 = self.conv_weight_variable('_w_conv3',self.third_conv)
+        b_conv3 = self.bias_variable('_b_conv3',[self.third_conv[3]])
 
-            # Densely connect layer variables
-            w_fc1 = self.weight_variable('_w_fc1',self.first_dense)
-            b_fc1 = self.bias_variable('_b_fc1',[self.first_dense[1]])
+        # Densely connect layer variables
+        w_fc1 = self.weight_variable('_w_fc1',self.first_dense)
+        b_fc1 = self.bias_variable('_b_fc1',[self.first_dense[1]])
 
-            w_fc2 = self.weight_variable('_w_fc2',self.second_dense)
-            b_fc2 = self.bias_variable('_b_fc2',[self.second_dense[1]])
+        w_fc2 = self.weight_variable('_w_fc2',self.second_dense)
+        b_fc2 = self.bias_variable('_b_fc2',[self.second_dense[1]])
 
         # hidden layers
         h_conv1 = tf.nn.relu(self.conv2d(x_image,w_conv1,4) + b_conv1)
@@ -167,18 +171,18 @@ class DQN_agent:
 
         # Q Value layer
         output = tf.matmul(h_fc1, w_fc2) + b_fc2
-        return x_image, output
+
+        return x_image, output, w_conv1, b_conv1, w_conv2, b_conv2, w_conv3, b_conv3, w_fc1, b_fc1, w_fc2, b_fc2
 
     def loss_and_train(self):
         # Loss function and Train
-        action_tgt = tf.placeholder(tf.float32, shape = [None, self.action_size])
-        y_tgt = tf.placeholder(tf.float32, shape = [None])
+        self.action_tgt = tf.placeholder(tf.float32,shape = [None,self.action_size])
+        self.y_tgt = tf.placeholder(tf.float32, shape = [None]) 
+        
+        y_prediction = tf.reduce_sum(tf.multiply(self.output, self.action_tgt), reduction_indices = 1)
+        self.Loss = tf.reduce_mean(tf.square(self.y_tgt - y_prediction))
+        self.train_step = tf.train.AdamOptimizer(1e-6).minimize(self.Loss)
 
-        y_prediction = tf.reduce_sum(tf.multiply(self.output, action_tgt), reduction_indices = 1)
-        Loss = tf.reduce_mean(tf.square(y_prediction - y_tgt))
-        train_step = tf.train.AdamOptimizer(learning_rate = self.learning_rate, epsilon = 1e-02).minimize(Loss)
-
-        return train_step, action_tgt, y_tgt, Loss
 
     # pick samples randomly from replay memory (with batch_size)
     def train_model(self):
@@ -195,14 +199,15 @@ class DQN_agent:
         # Get target values
         y_array = []
         # Selecting actions
-        tgt_q_value_next = self.tgt_output.eval(feed_dict = {self.tgt_input: next_states})
+        q_value_next = self.output.eval(feed_dict = {self.input: next_states})
+        # tgt_q_value_next = self.tgt_output.eval(feed_dict = {self.tgt_input: next_states})
 
         for i in range(0,self.batch_size):
             done = minibatch[i][4]
             if done:
                 y_array.append(rewards[i])
             else:
-                y_array.append(rewards[i] + self.discount_factor * np.max(tgt_q_value_next[i]))
+                y_array.append(rewards[i] + self.discount_factor * np.max(q_value_next[i]))
 
         # Training!! 
         feed_dict = {self.action_tgt: actions, self.y_tgt: y_array, self.input: states}
@@ -238,21 +243,6 @@ class DQN_agent:
         
         while len(self.memory) > self.size_replay_memory:
             self.memory.popleft()
-            
-    # after some time interval update the target model to be same with model
-    def Copy_Weights(self):
-        # Get trainable variables
-        trainable_variables = tf.trainable_variables()
-        # network variables
-        src_vars = [var for var in trainable_variables if var.name.startswith('network')]
-
-        # target variables
-        dest_vars = [var for var in trainable_variables if var.name.startswith('target')]
-
-        for i in range(len(src_vars)):
-            self.sess.run(tf.assign(dest_vars[i], src_vars[i]))
-            
-        # print(" Weights are copied!!")
 
     def save_model(self):
         # Save the variables to disk.
@@ -299,9 +289,6 @@ def main():
     print("\n\n",game_name, "-game start at :",display_time,"\n")
     start_time = time.time()
     
-    # Initialize target network.
-    agent.Copy_Weights()
-    
     while time.time() - start_time < agent.training_time:
 
         done = False
@@ -333,9 +320,6 @@ def main():
             if agent.progress == "Training":
                 # Training!
                 agent.train_model()
-                if done or agent.step % agent.target_update_cycle == 0:
-                    # return# copy q_net --> target_net
-                    agent.Copy_Weights()
                     
             # update the old values
             stacked_state = stacked_next_state

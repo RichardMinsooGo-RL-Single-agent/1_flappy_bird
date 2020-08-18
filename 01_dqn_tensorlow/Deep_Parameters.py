@@ -22,3 +22,9 @@ second_conv  = [4,4,32,64]
 third_conv   = [3,3,64,64]
 first_dense  = [1600, 512]
 second_dense = [512, Num_action]
+
+state_dense  = [1600, 512]
+state_output = [512, Num_action]
+
+action_dense  = [1600, 512]
+action_output = [512, Num_action]
