@@ -25,15 +25,13 @@ import wrapped_flappy_bird as game
 # import json
 from keras.initializers import normal, identity
 from keras.models import model_from_json
-# from keras.models import Sequential
-from keras.models import Model
-from keras.layers import Dense, Lambda, Input, Add, Subtract
+from keras.models import Sequential
 from keras.layers.core import Dense, Dropout, Activation, Flatten
 from keras.layers.convolutional import Convolution2D, MaxPooling2D
 from keras.optimizers import SGD , Adam
 
 FRAME_PER_ACTION = 1
-game_name = '05_bird_dueling_Keras_b'  # the name of the game being played for log files
+game_name = '04_bird_ddqn_Keras_a'  # the name of the game being played for log files
 action_size = 2               # number of valid actions
 
 model_path = "save_model/" + game_name
@@ -44,8 +42,8 @@ if not os.path.exists(model_path):
     os.makedirs(model_path)
 if not os.path.exists(graph_path):
     os.makedirs(graph_path)
-
-class DuelingDQN:
+    
+class DoubleDQN:
     def __init__(self):
 
         # Get parameters
@@ -89,39 +87,86 @@ class DuelingDQN:
         self.img_channels = 4 #We stack 4 frames
 
         # create main model and target model
-        self.model = self.build_model()
-        self.target_model = self.build_model()
+        self.model = self.build_model('network')
+        self.target_model = self.build_model('target')
 
-        
-    def build_model(self):
+            
+    def reset_env(self, game_state):
+        # get the first state by doing nothing and preprocess the image to 80x80x4
+        do_nothing = np.zeros(action_size)
+        do_nothing[0] = 1
+
+        state, reward, done = game_state.frame_step(do_nothing)
+
+        state = skimage.color.rgb2gray(state)
+        state = skimage.transform.resize(state,(self.img_rows,self.img_cols))
+        state = skimage.exposure.rescale_intensity(state,out_range=(0,255))
+        state = state / 255.0
+
+        # agent.setInitState(state)
+        stacked_state = np.stack((state, state, state, state), axis = 2)
+        return stacked_state        
+    
+    # Resize and make input as grayscale
+    def preprocess(self, state):
+        state_out = skimage.color.rgb2gray(state)
+        state_out = skimage.transform.resize(state_out,(self.img_rows,self.img_cols))
+        state_out = skimage.exposure.rescale_intensity(state_out, out_range=(0, 255))
+        state_out = state_out / 255.0
+        state_out = state_out.reshape(1, state_out.shape[0], state_out.shape[1], 1) #1x80x80x1
+            
+        return state_out
+
+    def build_model(self, network_name):
         print("Now we build the model")
-        state = Input(shape=(self.img_rows,self.img_cols,self.img_channels))
-        net1 = Convolution2D(32, 8, 8, subsample=(4, 4), border_mode='same',input_shape=(self.img_rows,self.img_cols,self.img_channels))(state)  #80*80*4
-        net2 = Activation('relu')(net1)
-        net3 = Convolution2D(64, 4, 4, subsample=(2, 2), border_mode='same')(net2)
-        net4 = Activation('relu')(net3)
-        net5 = Convolution2D(64, 3, 3, subsample=(1, 1), border_mode='same')(net4)
-        net6 = Activation('relu')(net5)
-        net7 = Flatten()(net6)
-        net8 = Dense(512)(net7)
-        net9 = Activation('relu')(net8)
+        model = Sequential()
+        model.add(Convolution2D(32, 8, 8, subsample=(4, 4), border_mode='same',input_shape=(self.img_rows,self.img_cols,self.img_channels)))  #80*80*4
+        model.add(Activation('relu'))
+        model.add(Convolution2D(64, 4, 4, subsample=(2, 2), border_mode='same'))
+        model.add(Activation('relu'))
+        model.add(Convolution2D(64, 3, 3, subsample=(1, 1), border_mode='same'))
+        model.add(Activation('relu'))
+        model.add(Flatten())
+        model.add(Dense(512))
+        model.add(Activation('relu'))
+        model.add(Dense(self.action_size))
         
-        state_layer_1 = Dense(512)(net9)
-        action_layer_1 = Dense(512)(net9)
-
-        v = Dense(1, activation='linear', kernel_initializer='he_uniform')(state_layer_1)
-        v = Lambda(lambda v: tf.tile(v, [1, self.action_size]))(v)
-        a = Dense(self.action_size, activation='linear', kernel_initializer='he_uniform')(action_layer_1)
-        a = Lambda(lambda a: a - tf.reduce_mean(a, axis=-1, keep_dims=True))(a)
-        tgt_output = Add()([v, a])
-        # model = Model(inputs = state, outputs = q)
-        
-        model = Model(inputs=state, outputs=tgt_output)
         model.compile(loss='mse',optimizer = Adam(lr = self.learning_rate))
-        
-        model.summary()
-        
+        print("We finish building the model")
         return model
+
+    # pick samples randomly from replay memory (with batch_size)
+    def train_model(self):
+        # sample a minibatch to train on
+        minibatch = random.sample(self.memory, self.batch_size)
+
+        #Now we do the experience replay
+        states, actions, rewards, next_states, dones = zip(*minibatch)
+        states      = np.concatenate(states)
+        next_states = np.concatenate(next_states)
+
+        q_value      = self.model.predict(states)
+        q_value_next = self.model.predict(next_states)
+        tgt_q_value_next = self.target_model.predict(next_states)
+
+        # q_value[range(self.batch_size), actions] = rewards + discount_factor*np.max(tgt_q_value_next, axis=1)*np.invert(dones)
+        
+        # Double DQN
+        for i in range(self.batch_size):
+            if dones[i]:
+                q_value[i][actions[i]] = rewards[i]
+            else:
+                a = np.argmax(tgt_q_value_next[i])
+                q_value[i][actions[i]] = rewards[i] + self.discount_factor * q_value_next[i][a]
+        
+        # loss += self.model.train_on_batch(states, q_value)
+        self.model.fit(states, q_value, epochs=1, verbose=0)
+
+        # Decrease epsilon while training
+        if self.epsilon > self.epsilon_min:
+            self.epsilon -= self.epsilon_decay
+        else :
+            self.epsilon = self.epsilon_min
 
     # get action from model using epsilon-greedy policy
     def get_action(self, stacked_state):
@@ -164,8 +209,7 @@ class DuelingDQN:
         print("\n Model saved in file: %s" % model_path)
 
 def main():
-    
-    agent = DuelingDQN()
+    agent = DoubleDQN()
     
     # Initialize variables
     # Load the file if the saved file exists
@@ -184,19 +228,8 @@ def main():
     
     # open up a game state to communicate with emulator
     game_state = game.GameState()
-
-    # get the first state by doing nothing and preprocess the image to 80x80x4
-    do_nothing = np.zeros(action_size)
-    do_nothing[0] = 1
     
-    state, reward, done = game_state.frame_step(do_nothing)
-    
-    state = skimage.color.rgb2gray(state)
-    state = skimage.transform.resize(state,(80,80))
-    state = skimage.exposure.rescale_intensity(state,out_range=(0,255))
-    state = state / 255.0
-    
-    stacked_state = np.stack((state, state, state, state), axis=2)
+    stacked_state = agent.reset_env(game_state)
 
     # start training    
     # In Keras, need to reshape
@@ -234,13 +267,8 @@ def main():
 
             # run the selected action and observe next state and reward
             next_state, reward, done = game_state.frame_step(action)
+            next_state = agent.preprocess(next_state)
             
-            next_state = skimage.color.rgb2gray(next_state)
-            next_state = skimage.transform.resize(next_state,(80,80))
-            next_state = skimage.exposure.rescale_intensity(next_state, out_range=(0, 255))
-            next_state = next_state / 255.0
-            next_state = next_state.reshape(1, next_state.shape[0], next_state.shape[1], 1) #1x80x80x1
-
             stacked_next_state = np.append(next_state, stacked_state[:, :, :, :3], axis=3)
 
             # store the transition in memory
@@ -248,29 +276,8 @@ def main():
             
             # only train if done observing
             if agent.progress == "Training":
-                # agent.train_model()
-                # sample a minibatch to train on
-                minibatch = random.sample(agent.memory, agent.batch_size)
-
-                #Now we do the experience replay
-                states, actions, rewards, next_states, dones = zip(*minibatch)
-                states      = np.concatenate(states)
-                next_states = np.concatenate(next_states)
-                
-                q_value      = agent.model.predict(states)
-                q_value_next = agent.model.predict(next_states)
-                tgt_q_value_next = agent.target_model.predict(next_states)
-                
-                q_value[range(agent.batch_size), actions] = rewards + agent.discount_factor*np.max(tgt_q_value_next, axis=1)*np.invert(dones)
-
-                loss += agent.model.train_on_batch(states, q_value)
-                
-                # scale down epsilon
-                if agent.epsilon > agent.epsilon_min:
-                    agent.epsilon -= agent.epsilon_decay
-                else:
-                    agent.epsilon = agent.epsilon_min
-                
+                # Training!
+                agent.train_model()
                 if done or agent.step % agent.target_update_cycle == 0:
                     # return# copy q_net --> target_net
                     agent.Copy_Weights()

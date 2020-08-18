@@ -1,25 +1,28 @@
 #!/usr/bin/env python
 from __future__ import print_function
 
-import argparse
 import skimage as skimage
 from skimage import transform, color, exposure
 from skimage.transform import rotate
 from skimage.viewer import ImageViewer
 
 import tensorflow as tf
-import os
 import os.path
+import random
+import numpy as np
+import time, datetime
+from collections import deque
 import pickle
+
+import os
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
+
+# Import game
 import sys
 sys.path.append("game/")
 import wrapped_flappy_bird as game
-import random
-import numpy as np
-from collections import deque
-import time
 
-import json
+# import json
 from keras.initializers import normal, identity
 from keras.models import model_from_json
 from keras.models import Sequential
@@ -28,21 +31,8 @@ from keras.layers.convolutional import Convolution2D, MaxPooling2D
 from keras.optimizers import SGD , Adam
 
 FRAME_PER_ACTION = 1
-game_name = 'bird_dqn_Keras'  # the name of the game being played for log files
-CONFIG = 'nothreshold'
+game_name = '02_bird_NIPS_2013_Keras_b'  # the name of the game being played for log files
 action_size = 2               # number of valid actions
-discount_factor = 0.99        # decay rate of past observations
-EXPLORE = 2000000.            # frames over which to anneal epsilon
-epsilon_max = 0.9             # starting value of epsilon
-epsilon_min = 0.00001         # final value of epsilon
-epsilon_decay = 0.00001
-size_replay_memory = 50000    # number of previous transitions to remember
-batch_size = 32               # size of minibatch
-learning_rate = 0.0001
-
-img_rows , img_cols = 80, 80
-#Convert image into Black and white
-img_channels = 4 #We stack 4 frames
 
 model_path = "save_model/" + game_name
 graph_path = "save_graph/" + game_name
@@ -52,48 +42,121 @@ if not os.path.exists(model_path):
     os.makedirs(model_path)
 if not os.path.exists(graph_path):
     os.makedirs(graph_path)
-
-def build_model():
-    print("Now we build the model")
-    model = Sequential()
-    model.add(Convolution2D(32, 8, 8, subsample=(4, 4), border_mode='same',input_shape=(img_rows,img_cols,img_channels)))  #80*80*4
-    model.add(Activation('relu'))
-    model.add(Convolution2D(64, 4, 4, subsample=(2, 2), border_mode='same'))
-    model.add(Activation('relu'))
-    model.add(Convolution2D(64, 3, 3, subsample=(1, 1), border_mode='same'))
-    model.add(Activation('relu'))
-    model.add(Flatten())
-    model.add(Dense(512))
-    model.add(Activation('relu'))
-    model.add(Dense(action_size))
-   
-    model.compile(loss='mse',optimizer=Adam(lr=learning_rate))
-    print("We finish building the model")
-    return model
- 
-def main():
-    model = build_model()
     
-    # store the previous observations in replay memory
-    memory = deque()
+class NIPS2013:
+    def __init__(self):
 
-    # saving and loading networks
-    if os.path.isfile(model_path+"/model.h5"):
-        model.load_weights(model_path+"/model.h5")
+        # Get parameters
+        self.progress = " "
         
-        if os.path.isfile(model_path + '/append_memory.pickle'):                        
-            with open(model_path + '/append_memory.pickle', 'rb') as f:
-                memory = pickle.load(f)
+        # get size of state and action
+        self.action_size = action_size
+        
+        # train time define
+        self.training_time = 10*60
+        
+        # These are hyper parameters for the DQN
+        self.learning_rate = 0.0001
+        self.discount_factor = 0.99
+        
+        self.epsilon_max = 1.0
+        # final value of epsilon
+        self.epsilon_min = 0.0001
+        self.epsilon_decay = 0.0001
+        self.epsilon = self.epsilon_max
+        
+        self.step = 0
+        self.score = 0
+        self.episode = 0
+        
+        self.ep_trial_step = 2000
+        
+        # parameters for skipping and stacking
+        # Parameter for Experience Replay
+        self.size_replay_memory = 5000
+        self.batch_size = 64
+        
+        # Experience Replay 
+        self.memory = deque(maxlen=self.size_replay_memory)
+        
+        # Parameters for network
+        self.img_rows , self.img_cols = 80, 80
+        self.img_channels = 4 #We stack 4 frames
 
+        # create main model and target model
+        self.model = self.build_model()
+        
+    def build_model(self):
+        print("Now we build the model")
+        model = Sequential()
+        model.add(Convolution2D(32, 8, 8, subsample=(4, 4), border_mode='same',input_shape=(self.img_rows,self.img_cols,self.img_channels)))  #80*80*4
+        model.add(Activation('relu'))
+        model.add(Convolution2D(64, 4, 4, subsample=(2, 2), border_mode='same'))
+        model.add(Activation('relu'))
+        model.add(Convolution2D(64, 3, 3, subsample=(1, 1), border_mode='same'))
+        model.add(Activation('relu'))
+        model.add(Flatten())
+        model.add(Dense(512))
+        model.add(Activation('relu'))
+        model.add(Dense(self.action_size))
+        
+        model.compile(loss='mse',optimizer = Adam(lr = self.learning_rate))
+        print("We finish building the model")
+        return model
+
+    # get action from model using epsilon-greedy policy
+    def get_action(self, stacked_state):
+        # choose an action epsilon greedily
+        action = np.zeros([self.action_size])
+        action_index = 0
+        
+        if random.random() < self.epsilon:
+            # print("----------Random Action----------")
+            action_index = random.randrange(self.action_size)
+            action[action_index] = 1
+        else:
+            Q_value = self.model.predict(stacked_state)       #input a stack of 4 images, get the prediction
+            action_index = np.argmax(Q_value)
+            action[action_index] = 1
+            
+        return action, action_index
+
+    # save sample <s,a,r,s'> to the replay memory
+    def append_sample(self, state, action, reward, next_state, done):
+        #in every action put in the memory
+        self.memory.append((state, action, reward, next_state, done))
+        
+        while len(self.memory) > self.size_replay_memory:
+            self.memory.popleft()
+            
+    def save_model(self):
+        # Save the variables to disk.
+        self.model.save_weights(model_path+"/model.h5")
+        save_object = (self.epsilon, self.episode, self.step)
+        with open(model_path + '/epsilon_episode.pickle', 'wb') as ggg:
+            pickle.dump(save_object, ggg)
+
+        print("\n Model saved in file: %s" % model_path)
+
+def main():
+    
+    agent = NIPS2013()
+    
+    # Initialize variables
+    # Load the file if the saved file exists
+    if os.path.isfile(model_path+"/model.h5"):
+        agent.model.load_weights(model_path+"/model.h5")
+        if os.path.isfile(model_path + '/epsilon_episode.pickle'):
+            
             with open(model_path + '/epsilon_episode.pickle', 'rb') as ggg:
-                epsilon, episode = pickle.load(ggg)
-                epsilon = 0.001
+                agent.epsilon, agent.episode, agent.step = pickle.load(ggg)
+            
+        print('\n\n Variables are restored!')
 
-            print("\n\n Successfully loaded \n\n")
     else:
-        epsilon = epsilon_max
-        print("\n\n Could not find old network weights")
-
+        print('\n\n Variables are initialized!')
+        agent.epsilon = agent.epsilon_max
+    
     # open up a game state to communicate with emulator
     game_state = game.GameState()
 
@@ -110,45 +173,36 @@ def main():
     
     stacked_state = np.stack((state, state, state, state), axis=2)
 
-    # start training
-
+    # start training    
     # In Keras, need to reshape
-    stacked_state = stacked_state.reshape(1, stacked_state.shape[0], stacked_state.shape[1], stacked_state.shape[2])  #1*80*80*4
-        
-    time_step = 0
-    episode = 0
-    progress = ""
+    stacked_state = stacked_state.reshape(1, stacked_state.shape[0], stacked_state.shape[1], stacked_state.shape[2])  #1*80*80*4        
+    # Step 3.2: run the game
+    display_time = datetime.datetime.now()
+    print("\n\n",game_name, "-game start at :",display_time,"\n")
     start_time = time.time()
     
-    while time.time() - start_time < 5*60:        
-        if len(memory) < size_replay_memory:
-            progress = "Exploration"            
-        else:
-            progress = "Training"
-                
+    while time.time() - start_time < agent.training_time:
+
+        done = False
+        agent.score = 0
         loss = 0
         q_value_next = 0
         reward = 0
         
         ep_step = 0
-        done = False
-        while not done and ep_step < 2000:
-            ep_step += 1
-            time_step += 1
-
-            # choose an action epsilon greedily
-            Q_value = model.predict(stacked_state)       #input a stack of 4 images, get the prediction
-            action = np.zeros([action_size])
-            action_index = 0
+        
+        while not done and ep_step < agent.ep_trial_step:
             
-            if time_step % FRAME_PER_ACTION == 0:
-                if random.random() <= epsilon:
-                    print("----------Random Action----------")
-                    action_index = random.randrange(action_size)
-                    action[action_index] = 1
-                else:
-                    action_index = np.argmax(Q_value)
-                    action[action_index] = 1
+            if len(agent.memory) < agent.size_replay_memory:
+                agent.progress = "Exploration"            
+            else:
+                agent.progress = "Training"
+
+            ep_step += 1
+            agent.step += 1
+
+            # Select action
+            action, action_index = agent.get_action(stacked_state)
 
             # run the selected action and observe next state and reward
             next_state, reward, done = game_state.frame_step(action)
@@ -162,51 +216,47 @@ def main():
             stacked_next_state = np.append(next_state, stacked_state[:, :, :, :3], axis=3)
 
             # store the transition in memory
-            memory.append((stacked_state, action_index, reward, stacked_next_state, done))
+            agent.append_sample(stacked_state, action_index, reward, stacked_next_state, done)
             
-            if len(memory) > size_replay_memory:
-                memory.popleft()
-
             # only train if done observing
-            if progress == "Training":
-                
+            if agent.progress == "Training":
+                # agent.train_model()
                 # sample a minibatch to train on
-                minibatch = random.sample(memory, batch_size)
+                minibatch = random.sample(agent.memory, agent.batch_size)
 
                 #Now we do the experience replay
                 states, actions, rewards, next_states, dones = zip(*minibatch)
                 states      = np.concatenate(states)
                 next_states = np.concatenate(next_states)
-                y_array     = model.predict(states)
-                q_value_next     = model.predict(next_states)
-                
-                y_array[range(batch_size), actions] = rewards + discount_factor*np.max(q_value_next, axis=1)*np.invert(dones)
+                y_array     = agent.model.predict(states)
+                q_value_next = agent.model.predict(next_states)            
+                y_array[range(agent.batch_size), actions] = rewards + agent.discount_factor*np.max(q_value_next, axis=1)*np.invert(dones)
 
-                loss += model.train_on_batch(states, y_array)
+                loss += agent.model.train_on_batch(states, y_array)
                 
                 # scale down epsilon
-                if epsilon > epsilon_min:
-                    epsilon -= epsilon_decay
-
+                if agent.epsilon > agent.epsilon_min:
+                    agent.epsilon -= agent.epsilon_decay
+                else:
+                    agent.epsilon = agent.epsilon_min
+                    
             # update the old values
             stacked_state = stacked_next_state
+            agent.score += reward
             
-            if done or ep_step == 2000:
-                episode += 1
-                print("Episode :{:>5}".format(episode), "/ Episode step :{:>4}".format(ep_step), "/ Progress :", progress, \
-                      "/ Epsilon :{:>2.6f}".format(epsilon), "/ Memory size :{:>5}".format(len(memory)))
+            # If game is over (done)
+            if done or ep_step == agent.ep_trial_step:
+                if agent.progress == "Training":
+                    agent.episode += 1
+                print('episode :{:>7,d}'.format(agent.episode),'/ ep step :{:>6,d}'.format(ep_step), \
+                      '/ time step :{:>10,d}'.format(agent.step),'/ progress :',agent.progress, \
+                      '/ epsilon :{:>1.5f}'.format(agent.epsilon),'/ score :{:> 5f}'.format(agent.score) )
                 break
-            
-    model.save_weights(model_path+"/model.h5")
-    with open(model_path+"/model.json", "w") as outfile:
-        json.dump(model.to_json(), outfile)
-    with open(model_path + '/append_memory.pickle', 'wb') as f:
-        pickle.dump(memory, f)
-        
-    save_object = (epsilon, episode) 
-    with open(model_path + '/epsilon_episode.pickle', 'wb') as ggg:
-        pickle.dump(save_object, ggg)
-    print("\n\n Now we save model \n\n")
+    # Save model
+    agent.save_model()
+
+    e = int(time.time() - start_time)
+    print(' Elasped time :{:02d}:{:02d}:{:02d}'.format(e // 3600, (e % 3600 // 60), e % 60))
     sys.exit()
 
 if __name__ == "__main__":
