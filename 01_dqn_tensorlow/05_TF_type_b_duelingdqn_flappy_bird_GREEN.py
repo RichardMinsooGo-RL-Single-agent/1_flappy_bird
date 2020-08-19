@@ -7,14 +7,13 @@ import numpy as np
 import time, datetime
 from collections import deque
 import pickle
-
+import sys
 import os
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 from tensorflow.python.framework import ops
 ops.reset_default_graph()
 
 # Import game
-import sys
 sys.path.append("game/")
 
 import Deep_Parameters
