@@ -12,14 +12,10 @@ import random
 import numpy as np
 import time, datetime
 from collections import deque
-import pickle
 import sys
+import pickle
 import os
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
-
-# Import game
-sys.path.append("game/")
-import wrapped_flappy_bird as game
 
 # import json
 from keras.initializers import normal, identity
@@ -30,6 +26,10 @@ from keras.layers.convolutional import Convolution2D, MaxPooling2D
 from keras.optimizers import SGD , Adam
 
 FRAME_PER_ACTION = 1
+# Import game
+sys.path.append("game/")
+import wrapped_flappy_bird as game
+
 game_name = '04_bird_ddqn_Keras_a'  # the name of the game being played for log files
 action_size = 2               # number of valid actions
 
@@ -158,7 +158,8 @@ class DoubleDQN:
                 a = np.argmax(tgt_q_value_next[i])
                 q_value[i][actions[i]] = rewards[i] + self.discount_factor * q_value_next[i][a]
         
-        # loss += self.model.train_on_batch(states, q_value)
+        # make minibatch which includes target q value and predicted q value
+        # and do the model fit!
         self.model.fit(states, q_value, epochs=1, verbose=0)
 
         # Decrease epsilon while training
@@ -277,7 +278,7 @@ def main():
             if agent.progress == "Training":
                 # Training!
                 agent.train_model()
-                if done or agent.step % agent.target_update_cycle == 0:
+                if done or ep_step % agent.target_update_cycle == 0:
                     # return# copy q_net --> target_net
                     agent.Copy_Weights()
                     

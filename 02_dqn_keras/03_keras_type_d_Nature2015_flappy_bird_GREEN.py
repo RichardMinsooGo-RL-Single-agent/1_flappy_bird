@@ -8,14 +8,11 @@ import random
 import numpy as np
 import time, datetime
 from collections import deque
-import pickle
+import pylab
 import sys
+import pickle
 import os
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
-
-# Import game
-sys.path.append("game/")
-import wrapped_flappy_bird as game
 
 # import json
 from keras.initializers import normal, identity
@@ -26,6 +23,10 @@ from keras.layers.convolutional import Convolution2D, MaxPooling2D
 from keras.optimizers import SGD , Adam
 
 FRAME_PER_ACTION = 1
+# Import game
+sys.path.append("game/")
+import wrapped_flappy_bird as game
+
 game_name = '03_bird_dqn_Keras_a'  # the name of the game being played for log files
 action_size = 2               # number of valid actions
 
@@ -42,9 +43,9 @@ class DQN_agent:
     def __init__(self):
 
         # Get parameters
+        # get size of state and action
         self.progress = " "
         
-        # get size of state and action
         self.action_size = action_size
         
         # train time define
