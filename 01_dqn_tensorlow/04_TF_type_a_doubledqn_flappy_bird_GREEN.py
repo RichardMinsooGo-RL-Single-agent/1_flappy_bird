@@ -1,22 +1,21 @@
 # Import modules
 import cv2
-import tensorflow as tf
 import os.path
 import random
 import numpy as np
 import time, datetime
 from collections import deque
-import pickle
+import pylab
 import sys
+import pickle
 import os
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 from tensorflow.python.framework import ops
 ops.reset_default_graph()
+import tensorflow as tf
 
 # Import game
 sys.path.append("game/")
-
-import Deep_Parameters
 import wrapped_flappy_bird as game
 
 # Hyper Parameters:
@@ -37,13 +36,13 @@ class DQN_agent:
     def __init__(self):
 
         # Get parameters
+        # get size of state and action
         self.progress = " "
         
-        # get size of state and action
         self.action_size = action_size
         
         # train time define
-        self.training_time = 5*60
+        self.training_time = 20*60
         
         # These are hyper parameters for the DQN
         self.learning_rate = 0.0001
@@ -162,16 +161,16 @@ class DQN_agent:
                 # y_array.append(rewards[i] + self.discount_factor * np.max(tgt_q_value_next[i]))
                 a = np.argmax(tgt_q_value_next[i])
                 y_array.append(rewards[i] + self.discount_factor * q_value_next[i][a] )
-
-        # Training!! 
-        feed_dict = {self.action_tgt: actions, self.y_tgt: y_array, self.input: states}
-        _, self.loss = self.sess.run([self.train_step, self.Loss], feed_dict = feed_dict)
         
         # Decrease epsilon while training
         if self.epsilon > self.epsilon_min:
             self.epsilon -= self.epsilon_decay
         else :
             self.epsilon = self.epsilon_min
+
+        # Training!! 
+        feed_dict = {self.action_tgt: actions, self.y_tgt: y_array, self.input: states}
+        _, self.loss = self.sess.run([self.train_step, self.Loss], feed_dict = feed_dict)
 
     # get action from model using epsilon-greedy policy
     def get_action(self, stacked_state):
@@ -268,7 +267,6 @@ def main():
         ep_step = 0
         
         while not done and ep_step < agent.ep_trial_step:
-            
             if len(agent.memory) < agent.size_replay_memory:
                 agent.progress = "Exploration"            
             else:
